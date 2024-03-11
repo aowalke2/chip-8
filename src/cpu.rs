@@ -91,7 +91,7 @@ impl Cpu {
 
     fn se_vx_and_byte(&mut self, opcode: u16) {
         let register = (opcode & 0x0F00) >> 8;
-        let data = self.registers[(register - 1) as usize];
+        let data = self.registers[register as usize];
         if data == (opcode & 0x00FF) as u8 {
             self.program_counter += 2;
         }
@@ -99,17 +99,17 @@ impl Cpu {
 
     fn sne_vx_and_byte(&mut self, opcode: u16) {
         let register = (opcode & 0x0F00) >> 8;
-        let data = self.registers[(register - 1) as usize];
+        let data = self.registers[register as usize];
         if data != (opcode & 0x00FF) as u8 {
             self.program_counter += 2;
         }
     }
 
     fn se_vx_and_vy(&mut self, opcode: u16) {
-        let register_x = (opcode & 0x0F00) >> 8;
-        let register_y = (opcode & 0x00F0) >> 4;
-        let data_x = self.registers[(register_x - 1) as usize];
-        let data_y = self.registers[(register_y - 1) as usize];
+        let x = (opcode & 0x0F00) >> 8;
+        let y = (opcode & 0x00F0) >> 4;
+        let data_x = self.registers[x as usize];
+        let data_y = self.registers[y as usize];
         if data_x == data_y {
             self.program_counter += 2;
         }
@@ -117,18 +117,48 @@ impl Cpu {
 
     fn ld_vx_with_byte(&mut self, opcode: u16) {
         let register = (opcode & 0x0F00) >> 8;
-        self.registers[(register - 1) as usize] = (opcode & 0x00FF) as u8;
+        self.registers[register as usize] = (opcode & 0x00FF) as u8;
     }
 
     fn add_vx_with_byte(&mut self, opcode: u16) {
         let register = (opcode & 0x0F00) >> 8;
-        self.registers[(register - 1) as usize] += (opcode & 0x00FF) as u8;
+        self.registers[register as usize] += (opcode & 0x00FF) as u8;
     }
 
     fn ld_vx_with_vy(&mut self, opcode: u16) {
-        let register_x = (opcode & 0x0F00) >> 8;
-        let register_y = (opcode & 0x00F0) >> 4;
-        self.registers[(register_x - 1) as usize] = self.registers[(register_y - 1) as usize];
+        let x = (opcode & 0x0F00) >> 8;
+        let y = (opcode & 0x00F0) >> 4;
+        self.registers[x as usize] = self.registers[y as usize];
+    }
+
+    fn or_vx_with_vy(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let y = (opcode & 0x00F0) >> 4;
+        let result = self.registers[x as usize] | self.registers[y as usize];
+        self.registers[x as usize] = result;
+    }
+
+    fn and_vx_with_vy(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let y = (opcode & 0x00F0) >> 4;
+        let result = self.registers[x as usize] & self.registers[y as usize];
+        self.registers[x as usize] = result;
+    }
+
+    fn xor_vx_with_vy(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let y = (opcode & 0x00F0) >> 4;
+        let result = self.registers[x as usize] ^ self.registers[y as usize];
+        self.registers[x as usize] = result;
+    }
+
+    fn add_vx_with_vy(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let y = (opcode & 0x00F0) >> 4;
+        let (result, carry) =
+            self.registers[x as usize].overflowing_add(self.registers[y as usize]);
+        self.registers[0xF] = if carry { 1 } else { 0 };
+        self.registers[x as usize] = result;
     }
 
     pub fn tick_timers(&mut self) {
@@ -176,10 +206,10 @@ impl Cpu {
             (6, _, _, _) => self.ld_vx_with_byte(opcode),
             (7, _, _, _) => self.add_vx_with_byte(opcode),
             (8, _, _, 0) => self.ld_vx_with_vy(opcode),
-            (8, _, _, 1) => println!("OR Vx, Vy: {opcode}"),
-            (8, _, _, 2) => println!("AND Vx, Vy: {opcode}"),
-            (8, _, _, 3) => println!("XOR Vx, Vy: {opcode}"),
-            (8, _, _, 4) => println!("ADD Vx, Vy: {opcode}"),
+            (8, _, _, 1) => self.or_vx_with_vy(opcode),
+            (8, _, _, 2) => self.and_vx_with_vy(opcode),
+            (8, _, _, 3) => self.xor_vx_with_vy(opcode),
+            (8, _, _, 4) => self.add_vx_with_vy(opcode),
             (8, _, _, 5) => println!("SUB Vx, Vy: {opcode}"),
             (8, _, _, 6) => println!("SHR Vx {{, Vy}}: {opcode}"),
             (8, _, _, 7) => println!("SUBN Vx, Vy: {opcode}"),
@@ -269,7 +299,7 @@ mod test {
         let mut cpu = Cpu::new();
         cpu.program_counter = PROGRAM_START;
         cpu.registers[1] = 0x55;
-        cpu.se_vx_and_byte(0x3255);
+        cpu.se_vx_and_byte(0x3155);
         assert_eq!(cpu.program_counter, 0x0202)
     }
 
@@ -278,7 +308,7 @@ mod test {
         let mut cpu = Cpu::new();
         cpu.program_counter = PROGRAM_START;
         cpu.registers[1] = 0x55;
-        cpu.sne_vx_and_byte(0x4244);
+        cpu.sne_vx_and_byte(0x4144);
         assert_eq!(cpu.program_counter, 0x0202)
     }
 
@@ -288,14 +318,14 @@ mod test {
         cpu.program_counter = PROGRAM_START;
         cpu.registers[1] = 0x55;
         cpu.registers[2] = 0x55;
-        cpu.se_vx_and_vy(0x5230);
+        cpu.se_vx_and_vy(0x5120);
         assert_eq!(cpu.program_counter, 0x0202)
     }
 
     #[test]
     fn test_ld_vx_with_byte() {
         let mut cpu = Cpu::new();
-        cpu.ld_vx_with_byte(0x6230);
+        cpu.ld_vx_with_byte(0x6130);
         assert_eq!(cpu.registers[1], 0x0030)
     }
 
@@ -303,7 +333,7 @@ mod test {
     fn test_add_vx_with_byte() {
         let mut cpu = Cpu::new();
         cpu.registers[1] = 0x33;
-        cpu.add_vx_with_byte(0x7230);
+        cpu.add_vx_with_byte(0x7130);
         assert_eq!(cpu.registers[1], 0x0063)
     }
 
@@ -311,7 +341,34 @@ mod test {
     fn test_ld_vx_with_vy() {
         let mut cpu = Cpu::new();
         cpu.registers[2] = 0x33;
-        cpu.ld_vx_with_vy(0x8230);
+        cpu.ld_vx_with_vy(0x8120);
         assert_eq!(cpu.registers[1], 0x0033)
+    }
+
+    #[test]
+    fn test_or_vx_with_vy() {
+        let mut cpu = Cpu::new();
+        cpu.registers[7] = 0xe7;
+        cpu.registers[5] = 0x33;
+        cpu.or_vx_with_vy(0x8751);
+        assert_eq!(cpu.registers[7], 0xF7)
+    }
+
+    #[test]
+    fn test_and_vx_with_vy() {
+        let mut cpu = Cpu::new();
+        cpu.registers[7] = 0xe7;
+        cpu.registers[5] = 0x33;
+        cpu.and_vx_with_vy(0x8751);
+        assert_eq!(cpu.registers[7], 0x23)
+    }
+
+    #[test]
+    fn test_xor_vx_with_vy() {
+        let mut cpu = Cpu::new();
+        cpu.registers[7] = 0xe7; // 0b11100111
+        cpu.registers[5] = 0x33; // 0b00110011
+        cpu.xor_vx_with_vy(0x8751);
+        assert_eq!(cpu.registers[7], 0xD4)
     }
 }

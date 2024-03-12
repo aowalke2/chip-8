@@ -1,3 +1,5 @@
+use std::vec::Splice;
+
 use rand::Rng;
 
 const PROGRAM_START: u16 = 0x200;
@@ -142,9 +144,9 @@ impl Cpu {
     fn se_vx_and_vy(&mut self, opcode: u16) {
         let x = (opcode & 0x0F00) >> 8;
         let y = (opcode & 0x00F0) >> 4;
-        let data_x = self.registers[x as usize];
-        let data_y = self.registers[y as usize];
-        if data_x == data_y {
+        let vx = self.registers[x as usize];
+        let vy = self.registers[y as usize];
+        if vx == vy {
             self.program_counter += 2;
         }
     }
@@ -230,9 +232,9 @@ impl Cpu {
     fn sne_vx_and_vy(&mut self, opcode: u16) {
         let x = (opcode & 0x0F00) >> 8;
         let y = (opcode & 0x00F0) >> 4;
-        let data_x = self.registers[x as usize];
-        let data_y = self.registers[y as usize];
-        if data_x != data_y {
+        let vx = self.registers[x as usize];
+        let vy = self.registers[y as usize];
+        if vx != vy {
             self.program_counter += 2;
         }
     }
@@ -250,6 +252,32 @@ impl Cpu {
         let byte = rng.gen_range(0..=255) as u8;
         let x = (opcode & 0x0F00) >> 8;
         self.registers[x as usize] = byte & (opcode & 0x00FF) as u8;
+    }
+
+    fn draw(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let y = (opcode & 0x00F0) >> 4;
+        let n = (opcode & 0x000F) as u8; // height
+
+        let x_coordinate = self.registers[x as usize];
+        let y_coordinate = self.registers[y as usize];
+        let mut is_flipped = false;
+
+        for dy in 0..n {
+            let addr = self.index_register + dy as u16;
+            let pixels = self.mem_read(addr);
+            for dx in 0..8 {
+                if (pixels & (0b1000_0000 >> dx)) != 0 {
+                    let col = (x_coordinate + dx) as usize % SCREEN_WIDTH;
+                    let row = (y_coordinate + dy) as usize % SCREEN_HEIGHT;
+
+                    is_flipped |= self.screen[row][col];
+                    self.screen[row][col] ^= true;
+                }
+            }
+        }
+
+        self.registers[0xF] = if is_flipped { 1 } else { 0 };
     }
 
     pub fn tick_timers(&mut self) {
@@ -324,7 +352,7 @@ impl Cpu {
             (0xA, _, _, _) => self.ld_i_with_addr(opcode),
             (0xB, _, _, _) => self.jp_to_v0_plus_addr(opcode),
             (0xC, _, _, _) => self.rnd(opcode),
-            (0xD, _, _, _) => println!("DRW Vx, Vy, nibble: {opcode}"),
+            (0xD, _, _, _) => self.draw(opcode),
             (0xE, _, 9, 0xE) => println!("SKP Vx: {opcode}"),
             (0xE, _, 0xA, 1) => println!("SKNP Vx: {opcode}"),
             (0xF, _, 0, 7) => println!("LD Vx, DT: {opcode}"),
@@ -608,5 +636,39 @@ mod test {
         cpu.registers[8] = 0x46;
         cpu.rnd(0xC811);
         assert!(true); // cant really test this with the rng
+    }
+
+    #[test]
+    fn test_draw() {
+        let mut cpu = Cpu::new();
+        cpu.registers[1] = 0x20;
+        cpu.registers[2] = 0x10;
+        cpu.index_register = PROGRAM_START;
+        let sprite = [0xF0, 0x90, 0x90, 0x90, 0xF0];
+        cpu.memory[PROGRAM_START as usize..PROGRAM_START as usize + sprite.len()]
+            .copy_from_slice(&sprite);
+        cpu.draw(0xD125);
+
+        let coordinates = [
+            (16, 32),
+            (16, 33),
+            (16, 34),
+            (16, 35),
+            (17, 32),
+            (17, 35),
+            (18, 32),
+            (18, 35),
+            (19, 32),
+            (19, 35),
+            (20, 32),
+            (20, 33),
+            (20, 34),
+            (20, 35),
+        ];
+
+        for (r, c) in coordinates {
+            assert!(cpu.screen[r][c])
+        }
+        assert_eq!(cpu.registers[0xF], 0)
     }
 }

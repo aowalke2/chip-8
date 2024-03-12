@@ -126,17 +126,17 @@ impl Cpu {
     }
 
     fn se_vx_and_byte(&mut self, opcode: u16) {
-        let register = (opcode & 0x0F00) >> 8;
-        let data = self.registers[register as usize];
-        if data == (opcode & 0x00FF) as u8 {
+        let x = (opcode & 0x0F00) >> 8;
+        let vx = self.registers[x as usize];
+        if vx == (opcode & 0x00FF) as u8 {
             self.program_counter += 2;
         }
     }
 
     fn sne_vx_and_byte(&mut self, opcode: u16) {
-        let register = (opcode & 0x0F00) >> 8;
-        let data = self.registers[register as usize];
-        if data != (opcode & 0x00FF) as u8 {
+        let x = (opcode & 0x0F00) >> 8;
+        let vx = self.registers[x as usize];
+        if vx != (opcode & 0x00FF) as u8 {
             self.program_counter += 2;
         }
     }
@@ -152,13 +152,13 @@ impl Cpu {
     }
 
     fn ld_vx_with_byte(&mut self, opcode: u16) {
-        let register = (opcode & 0x0F00) >> 8;
-        self.registers[register as usize] = (opcode & 0x00FF) as u8;
+        let x = (opcode & 0x0F00) >> 8;
+        self.registers[x as usize] = (opcode & 0x00FF) as u8;
     }
 
     fn add_vx_with_byte(&mut self, opcode: u16) {
-        let register = (opcode & 0x0F00) >> 8;
-        self.registers[register as usize] += (opcode & 0x00FF) as u8;
+        let x = (opcode & 0x0F00) >> 8;
+        self.registers[x as usize] += (opcode & 0x00FF) as u8;
     }
 
     fn ld_vx_with_vy(&mut self, opcode: u16) {
@@ -208,8 +208,8 @@ impl Cpu {
 
     fn shr_vx(&mut self, opcode: u16) {
         let x = (opcode & 0x0F00) >> 8;
-        let data = self.registers[x as usize];
-        self.registers[0xF] = data & 1;
+        let vx = self.registers[x as usize];
+        self.registers[0xF] = vx & 1;
         self.registers[x as usize] >>= 1;
     }
 
@@ -224,8 +224,8 @@ impl Cpu {
 
     fn shl_vx(&mut self, opcode: u16) {
         let x = (opcode & 0x0F00) >> 8;
-        let data = self.registers[x as usize];
-        self.registers[0xF] = (data >> 7) & 1;
+        let vx = self.registers[x as usize];
+        self.registers[0xF] = (vx >> 7) & 1;
         self.registers[x as usize] <<= 1;
     }
 
@@ -278,6 +278,22 @@ impl Cpu {
         }
 
         self.registers[0xF] = if is_flipped { 1 } else { 0 };
+    }
+
+    fn skp(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let vx = self.registers[x as usize];
+        if self.keys[vx as usize] {
+            self.program_counter += 2
+        }
+    }
+
+    fn sknp(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let vx = self.registers[x as usize];
+        if !self.keys[vx as usize] {
+            self.program_counter += 2
+        }
     }
 
     pub fn tick_timers(&mut self) {
@@ -353,8 +369,8 @@ impl Cpu {
             (0xB, _, _, _) => self.jp_to_v0_plus_addr(opcode),
             (0xC, _, _, _) => self.rnd(opcode),
             (0xD, _, _, _) => self.draw(opcode),
-            (0xE, _, 9, 0xE) => println!("SKP Vx: {opcode}"),
-            (0xE, _, 0xA, 1) => println!("SKNP Vx: {opcode}"),
+            (0xE, _, 9, 0xE) => self.skp(opcode),
+            (0xE, _, 0xA, 1) => self.sknp(opcode),
             (0xF, _, 0, 7) => println!("LD Vx, DT: {opcode}"),
             (0xF, _, 0, 0xA) => println!("LD Vx, K: {opcode}"),
             (0xF, _, 1, 5) => println!("LD DT, Vx: {opcode}"),
@@ -670,5 +686,25 @@ mod test {
             assert!(cpu.screen[r][c])
         }
         assert_eq!(cpu.registers[0xF], 0)
+    }
+
+    #[test]
+    fn test_skp() {
+        let mut cpu = Cpu::new();
+        cpu.program_counter = PROGRAM_START;
+        cpu.registers[1] = 0x01;
+        cpu.keys[1] = true;
+        cpu.skp(0xE19E);
+        assert_eq!(cpu.program_counter, 0x202);
+    }
+
+    #[test]
+    fn test_sknp() {
+        let mut cpu = Cpu::new();
+        cpu.program_counter = PROGRAM_START;
+        cpu.registers[1] = 0x01;
+        cpu.keys[1] = false;
+        cpu.sknp(0xE19E);
+        assert_eq!(cpu.program_counter, 0x202);
     }
 }

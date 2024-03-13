@@ -1,5 +1,3 @@
-use std::vec::Splice;
-
 use rand::Rng;
 
 const PROGRAM_START: u16 = 0x200;
@@ -54,7 +52,7 @@ trait Stack {
 }
 
 #[derive(Debug, Clone)]
-pub struct Cpu {
+pub struct Interpreter {
     program_counter: u16,
     index_register: u16,
     stack_pointer: u8,
@@ -67,7 +65,7 @@ pub struct Cpu {
     keys: [bool; NUMBER_OF_KEYS],
 }
 
-impl Memory for Cpu {
+impl Memory for Interpreter {
     fn mem_read(&self, address: u16) -> u8 {
         self.memory[address as usize]
     }
@@ -77,7 +75,7 @@ impl Memory for Cpu {
     }
 }
 
-impl Stack for Cpu {
+impl Stack for Interpreter {
     fn stack_push(&mut self, address: u16) {
         self.stack[self.stack_pointer as usize] = address;
         self.stack_pointer += 1;
@@ -89,9 +87,9 @@ impl Stack for Cpu {
     }
 }
 
-impl Cpu {
-    pub fn new() -> Cpu {
-        let mut cpu = Self {
+impl Interpreter {
+    pub fn new() -> Interpreter {
+        let mut interpreter = Self {
             program_counter: 0,
             index_register: 0,
             stack_pointer: 0,
@@ -104,8 +102,8 @@ impl Cpu {
             keys: [false; NUMBER_OF_KEYS],
         };
 
-        cpu.memory[..FONTSET_SIZE].copy_from_slice(&FONTSET);
-        cpu
+        interpreter.memory[..FONTSET_SIZE].copy_from_slice(&FONTSET);
+        interpreter
     }
 
     fn cls(&mut self) {
@@ -158,7 +156,8 @@ impl Cpu {
 
     fn add_vx_with_byte(&mut self, opcode: u16) {
         let x = (opcode & 0x0F00) >> 8;
-        self.registers[x as usize] += (opcode & 0x00FF) as u8;
+        self.registers[x as usize] =
+            self.registers[x as usize].wrapping_add((opcode & 0x00FF) as u8);
     }
 
     fn ld_vx_with_vy(&mut self, opcode: u16) {
@@ -296,6 +295,77 @@ impl Cpu {
         }
     }
 
+    fn ld_vx_with_dt(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        self.registers[x as usize] = self.delay_timer;
+    }
+
+    fn ld_vx_with_key_press(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let mut pressed = false;
+        for i in 0..self.keys.len() {
+            if self.keys[i] {
+                self.registers[x as usize] = i as u8;
+                pressed = true;
+                break;
+            }
+        }
+
+        if !pressed {
+            self.program_counter -= 2
+        }
+    }
+
+    fn ld_dt_with_vx(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        self.delay_timer = self.registers[x as usize];
+    }
+
+    fn ld_st_with_vx(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        self.sound_timer = self.registers[x as usize];
+    }
+
+    fn add_i_with_vx(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        self.index_register = self
+            .index_register
+            .wrapping_add(self.registers[x as usize] as u16);
+    }
+
+    fn ld_i_with_font_address(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let data = self.registers[x as usize] as u16;
+        self.index_register = data * 5
+    }
+
+    fn ld_bcd(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        let vx = self.registers[x as usize] as f32;
+
+        let hundreds = (vx / 100.0).floor() as u8;
+        let tens = ((vx / 10.0) % 10.0).floor() as u8;
+        let ones = (vx % 10.0).floor() as u8;
+
+        self.mem_write(self.index_register, hundreds);
+        self.mem_write(self.index_register + 1, tens);
+        self.mem_write(self.index_register + 2, ones);
+    }
+
+    fn ld_mem_with_registers(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        for i in 0..=x {
+            self.mem_write(self.index_register + i, self.registers[i as usize]);
+        }
+    }
+
+    fn ld_registers_with_mem(&mut self, opcode: u16) {
+        let x = (opcode & 0x0F00) >> 8;
+        for i in 0..=x {
+            self.registers[i as usize] = self.mem_read(self.index_register + i);
+        }
+    }
+
     pub fn tick_timers(&mut self) {
         if self.delay_timer > 0 {
             self.delay_timer -= 1;
@@ -371,15 +441,15 @@ impl Cpu {
             (0xD, _, _, _) => self.draw(opcode),
             (0xE, _, 9, 0xE) => self.skp(opcode),
             (0xE, _, 0xA, 1) => self.sknp(opcode),
-            (0xF, _, 0, 7) => println!("LD Vx, DT: {opcode}"),
-            (0xF, _, 0, 0xA) => println!("LD Vx, K: {opcode}"),
-            (0xF, _, 1, 5) => println!("LD DT, Vx: {opcode}"),
-            (0xF, _, 1, 8) => println!("LD ST, Vx: {opcode}"),
-            (0xF, _, 1, 0xE) => println!("ADD I, Vx: {opcode}"),
-            (0xF, _, 2, 9) => println!("LD F, Vx: {opcode}"),
-            (0xF, _, 3, 3) => println!("LD B, Vx: {opcode}"),
-            (0xF, _, 5, 5) => println!("LD [I], Vx: {opcode}"),
-            (0xF, _, 6, 5) => println!("LD Vx, [I]: {opcode}"),
+            (0xF, _, 0, 7) => self.ld_vx_with_dt(opcode),
+            (0xF, _, 0, 0xA) => self.ld_vx_with_key_press(opcode),
+            (0xF, _, 1, 5) => self.ld_dt_with_vx(opcode),
+            (0xF, _, 1, 8) => self.ld_st_with_vx(opcode),
+            (0xF, _, 1, 0xE) => self.add_i_with_vx(opcode),
+            (0xF, _, 2, 9) => self.ld_i_with_font_address(opcode),
+            (0xF, _, 3, 3) => self.ld_bcd(opcode),
+            (0xF, _, 5, 5) => self.ld_mem_with_registers(opcode),
+            (0xF, _, 6, 5) => self.ld_registers_with_mem(opcode),
             (_, _, _, _) => unimplemented!("Opcode not defined: {opcode}"),
         }
     }
@@ -391,279 +461,279 @@ mod test {
 
     #[test]
     fn test_memory() {
-        let mut cpu = Cpu::new();
-        cpu.mem_write(PROGRAM_START, 0x20);
-        assert_eq!(cpu.mem_read(PROGRAM_START), 0x20);
+        let mut interpreter = Interpreter::new();
+        interpreter.mem_write(PROGRAM_START, 0x20);
+        assert_eq!(interpreter.mem_read(PROGRAM_START), 0x20);
     }
 
     #[test]
     fn test_load() {
         let program = [7; 1000];
-        let mut cpu = Cpu::new();
-        cpu.load(&program);
-        assert_eq!(cpu.program_counter, PROGRAM_START);
-        assert_eq!(cpu.mem_read(0x25f), 7);
+        let mut interpreter = Interpreter::new();
+        interpreter.load(&program);
+        assert_eq!(interpreter.program_counter, PROGRAM_START);
+        assert_eq!(interpreter.mem_read(0x25f), 7);
     }
 
     #[test]
     fn test_fetch() {
         let program = [0xff; 1000];
-        let mut cpu = Cpu::new();
-        cpu.load(&program);
-        let operation = cpu.fetch();
-        assert_eq!(cpu.program_counter, 0x202);
+        let mut interpreter = Interpreter::new();
+        interpreter.load(&program);
+        let operation = interpreter.fetch();
+        assert_eq!(interpreter.program_counter, 0x202);
         assert_eq!(operation, 0xffff);
     }
 
     #[test]
     fn test_cls() {
-        let mut cpu = Cpu::new();
-        cpu.screen[5][8] = true;
-        cpu.cls();
-        assert_eq!(cpu.screen[5][8], false)
+        let mut interpreter = Interpreter::new();
+        interpreter.screen[5][8] = true;
+        interpreter.cls();
+        assert_eq!(interpreter.screen[5][8], false)
     }
 
     #[test]
     fn test_ret() {
-        let mut cpu = Cpu::new();
-        cpu.stack_push(0x1111);
-        cpu.ret();
-        assert_eq!(cpu.program_counter, 0x1111);
+        let mut interpreter = Interpreter::new();
+        interpreter.stack_push(0x1111);
+        interpreter.ret();
+        assert_eq!(interpreter.program_counter, 0x1111);
     }
 
     #[test]
     fn test_jp_to_addr() {
-        let mut cpu = Cpu::new();
-        cpu.jp_to_addr(0x1111);
-        assert_eq!(cpu.program_counter, 0x0111);
+        let mut interpreter = Interpreter::new();
+        interpreter.jp_to_addr(0x1111);
+        assert_eq!(interpreter.program_counter, 0x0111);
     }
 
     #[test]
     fn test_call_at_addr() {
-        let mut cpu = Cpu::new();
-        cpu.program_counter = PROGRAM_START;
-        cpu.call_at_addr(0x2222);
-        assert_eq!(cpu.stack_pop(), 0x0200);
-        assert_eq!(cpu.program_counter, 0x0222)
+        let mut interpreter = Interpreter::new();
+        interpreter.program_counter = PROGRAM_START;
+        interpreter.call_at_addr(0x2222);
+        assert_eq!(interpreter.stack_pop(), 0x0200);
+        assert_eq!(interpreter.program_counter, 0x0222)
     }
 
     #[test]
     fn test_se_vx_and_byte() {
-        let mut cpu = Cpu::new();
-        cpu.program_counter = PROGRAM_START;
-        cpu.registers[1] = 0x55;
-        cpu.se_vx_and_byte(0x3155);
-        assert_eq!(cpu.program_counter, 0x0202)
+        let mut interpreter = Interpreter::new();
+        interpreter.program_counter = PROGRAM_START;
+        interpreter.registers[1] = 0x55;
+        interpreter.se_vx_and_byte(0x3155);
+        assert_eq!(interpreter.program_counter, 0x0202)
     }
 
     #[test]
     fn test_sne_vx_and_byte() {
-        let mut cpu = Cpu::new();
-        cpu.program_counter = PROGRAM_START;
-        cpu.registers[1] = 0x55;
-        cpu.sne_vx_and_byte(0x4144);
-        assert_eq!(cpu.program_counter, 0x0202)
+        let mut interpreter = Interpreter::new();
+        interpreter.program_counter = PROGRAM_START;
+        interpreter.registers[1] = 0x55;
+        interpreter.sne_vx_and_byte(0x4144);
+        assert_eq!(interpreter.program_counter, 0x0202)
     }
 
     #[test]
     fn test_se_vx_and_vy() {
-        let mut cpu = Cpu::new();
-        cpu.program_counter = PROGRAM_START;
-        cpu.registers[1] = 0x55;
-        cpu.registers[2] = 0x55;
-        cpu.se_vx_and_vy(0x5120);
-        assert_eq!(cpu.program_counter, 0x0202)
+        let mut interpreter = Interpreter::new();
+        interpreter.program_counter = PROGRAM_START;
+        interpreter.registers[1] = 0x55;
+        interpreter.registers[2] = 0x55;
+        interpreter.se_vx_and_vy(0x5120);
+        assert_eq!(interpreter.program_counter, 0x0202)
     }
 
     #[test]
     fn test_ld_vx_with_byte() {
-        let mut cpu = Cpu::new();
-        cpu.ld_vx_with_byte(0x6130);
-        assert_eq!(cpu.registers[1], 0x0030)
+        let mut interpreter = Interpreter::new();
+        interpreter.ld_vx_with_byte(0x6130);
+        assert_eq!(interpreter.registers[1], 0x0030)
     }
 
     #[test]
     fn test_add_vx_with_byte() {
-        let mut cpu = Cpu::new();
-        cpu.registers[1] = 0x33;
-        cpu.add_vx_with_byte(0x7130);
-        assert_eq!(cpu.registers[1], 0x0063)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[1] = 0x33;
+        interpreter.add_vx_with_byte(0x7130);
+        assert_eq!(interpreter.registers[1], 0x0063)
     }
 
     #[test]
     fn test_ld_vx_with_vy() {
-        let mut cpu = Cpu::new();
-        cpu.registers[2] = 0x33;
-        cpu.ld_vx_with_vy(0x8120);
-        assert_eq!(cpu.registers[1], 0x0033)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[2] = 0x33;
+        interpreter.ld_vx_with_vy(0x8120);
+        assert_eq!(interpreter.registers[1], 0x0033)
     }
 
     #[test]
     fn test_or_vx_with_vy() {
-        let mut cpu = Cpu::new();
-        cpu.registers[7] = 0xe7;
-        cpu.registers[5] = 0x33;
-        cpu.or_vx_with_vy(0x8751);
-        assert_eq!(cpu.registers[7], 0xF7)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[7] = 0xe7;
+        interpreter.registers[5] = 0x33;
+        interpreter.or_vx_with_vy(0x8751);
+        assert_eq!(interpreter.registers[7], 0xF7)
     }
 
     #[test]
     fn test_and_vx_with_vy() {
-        let mut cpu = Cpu::new();
-        cpu.registers[7] = 0xe7;
-        cpu.registers[5] = 0x33;
-        cpu.and_vx_with_vy(0x8752);
-        assert_eq!(cpu.registers[7], 0x23)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[7] = 0xe7;
+        interpreter.registers[5] = 0x33;
+        interpreter.and_vx_with_vy(0x8752);
+        assert_eq!(interpreter.registers[7], 0x23)
     }
 
     #[test]
     fn test_xor_vx_with_vy() {
-        let mut cpu = Cpu::new();
-        cpu.registers[7] = 0xe7;
-        cpu.registers[5] = 0x33;
-        cpu.xor_vx_with_vy(0x8753);
-        assert_eq!(cpu.registers[7], 0xD4)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[7] = 0xe7;
+        interpreter.registers[5] = 0x33;
+        interpreter.xor_vx_with_vy(0x8753);
+        assert_eq!(interpreter.registers[7], 0xD4)
     }
 
     #[test]
     fn test_add_vx_with_vy_carry() {
-        let mut cpu = Cpu::new();
-        cpu.registers[7] = 0xe7; // 0b11100111
-        cpu.registers[5] = 0x33; // 0b00110011
-        cpu.add_vx_with_vy(0x8754);
-        assert_eq!(cpu.registers[7], 0x1A);
-        assert_eq!(cpu.registers[0xF], 1)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[7] = 0xe7;
+        interpreter.registers[5] = 0x33;
+        interpreter.add_vx_with_vy(0x8754);
+        assert_eq!(interpreter.registers[7], 0x1A);
+        assert_eq!(interpreter.registers[0xF], 1)
     }
 
     #[test]
     fn test_add_vx_with_vy_no_carry() {
-        let mut cpu = Cpu::new();
-        cpu.registers[7] = 0x07;
-        cpu.registers[5] = 0x03;
-        cpu.add_vx_with_vy(0x8754);
-        assert_eq!(cpu.registers[7], 0x0A);
-        assert_eq!(cpu.registers[0xF], 0)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[7] = 0x07;
+        interpreter.registers[5] = 0x03;
+        interpreter.add_vx_with_vy(0x8754);
+        assert_eq!(interpreter.registers[7], 0x0A);
+        assert_eq!(interpreter.registers[0xF], 0)
     }
 
     #[test]
     fn test_sub_vx_with_vy_borrow() {
-        let mut cpu = Cpu::new();
-        cpu.registers[7] = 0x33;
-        cpu.registers[5] = 0xE7;
-        cpu.sub_vx_with_vy(0x8755);
-        assert_eq!(cpu.registers[7], 0x4C);
-        assert_eq!(cpu.registers[0xF], 0)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[7] = 0x33;
+        interpreter.registers[5] = 0xE7;
+        interpreter.sub_vx_with_vy(0x8755);
+        assert_eq!(interpreter.registers[7], 0x4C);
+        assert_eq!(interpreter.registers[0xF], 0)
     }
 
     #[test]
     fn test_sub_vx_with_vy_no_borrow() {
-        let mut cpu = Cpu::new();
-        cpu.registers[7] = 0xe7;
-        cpu.registers[5] = 0x33;
-        cpu.sub_vx_with_vy(0x8755);
-        assert_eq!(cpu.registers[7], 0xB4);
-        assert_eq!(cpu.registers[0xF], 1)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[7] = 0xe7;
+        interpreter.registers[5] = 0x33;
+        interpreter.sub_vx_with_vy(0x8755);
+        assert_eq!(interpreter.registers[7], 0xB4);
+        assert_eq!(interpreter.registers[0xF], 1)
     }
 
     #[test]
     fn test_shr_vx_vf_1() {
-        let mut cpu = Cpu::new();
-        cpu.registers[5] = 0x33;
-        cpu.shr_vx(0x8556);
-        assert_eq!(cpu.registers[5], 0x19);
-        assert_eq!(cpu.registers[0xF], 1)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[5] = 0x33;
+        interpreter.shr_vx(0x8556);
+        assert_eq!(interpreter.registers[5], 0x19);
+        assert_eq!(interpreter.registers[0xF], 1)
     }
 
     #[test]
     fn test_shr_vx_vf_0() {
-        let mut cpu = Cpu::new();
-        cpu.registers[5] = 0x32;
-        cpu.shr_vx(0x8556);
-        assert_eq!(cpu.registers[5], 0x19);
-        assert_eq!(cpu.registers[0xF], 0)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[5] = 0x32;
+        interpreter.shr_vx(0x8556);
+        assert_eq!(interpreter.registers[5], 0x19);
+        assert_eq!(interpreter.registers[0xF], 0)
     }
 
     #[test]
     fn test_subn_vx_with_vy_borrow() {
-        let mut cpu = Cpu::new();
-        cpu.registers[7] = 0x33;
-        cpu.registers[5] = 0xE7;
-        cpu.subn_vx_with_vy(0x8757);
-        assert_eq!(cpu.registers[7], 0xB4);
-        assert_eq!(cpu.registers[0xF], 1)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[7] = 0x33;
+        interpreter.registers[5] = 0xE7;
+        interpreter.subn_vx_with_vy(0x8757);
+        assert_eq!(interpreter.registers[7], 0xB4);
+        assert_eq!(interpreter.registers[0xF], 1)
     }
 
     #[test]
     fn test_subn_vx_with_vy_no_borrow() {
-        let mut cpu = Cpu::new();
-        cpu.registers[7] = 0xe7;
-        cpu.registers[5] = 0x33;
-        cpu.subn_vx_with_vy(0x8757);
-        assert_eq!(cpu.registers[7], 0x4C);
-        assert_eq!(cpu.registers[0xF], 0)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[7] = 0xe7;
+        interpreter.registers[5] = 0x33;
+        interpreter.subn_vx_with_vy(0x8757);
+        assert_eq!(interpreter.registers[7], 0x4C);
+        assert_eq!(interpreter.registers[0xF], 0)
     }
 
     #[test]
     fn test_shl_vx_vf_1() {
-        let mut cpu = Cpu::new();
-        cpu.registers[5] = 0xE3;
-        cpu.shl_vx(0x855E);
-        assert_eq!(cpu.registers[5], 0xC6);
-        assert_eq!(cpu.registers[0xF], 1)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[5] = 0xE3;
+        interpreter.shl_vx(0x855E);
+        assert_eq!(interpreter.registers[5], 0xC6);
+        assert_eq!(interpreter.registers[0xF], 1)
     }
 
     #[test]
     fn test_shl_vx_vf_0() {
-        let mut cpu = Cpu::new();
-        cpu.registers[5] = 0x32;
-        cpu.shl_vx(0x855E);
-        assert_eq!(cpu.registers[5], 0x64);
-        assert_eq!(cpu.registers[0xF], 0)
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[5] = 0x32;
+        interpreter.shl_vx(0x855E);
+        assert_eq!(interpreter.registers[5], 0x64);
+        assert_eq!(interpreter.registers[0xF], 0)
     }
 
     #[test]
     fn test_sne_vx_and_vy() {
-        let mut cpu = Cpu::new();
-        cpu.program_counter = PROGRAM_START;
-        cpu.registers[1] = 0x55;
-        cpu.registers[2] = 0x54;
-        cpu.sne_vx_and_vy(0x9120);
-        assert_eq!(cpu.program_counter, 0x0202)
+        let mut interpreter = Interpreter::new();
+        interpreter.program_counter = PROGRAM_START;
+        interpreter.registers[1] = 0x55;
+        interpreter.registers[2] = 0x54;
+        interpreter.sne_vx_and_vy(0x9120);
+        assert_eq!(interpreter.program_counter, 0x0202)
     }
 
     #[test]
     fn test_ld_i_with_addr() {
-        let mut cpu = Cpu::new();
-        cpu.ld_i_with_addr(0xA130);
-        assert_eq!(cpu.index_register, 0x0130)
+        let mut interpreter = Interpreter::new();
+        interpreter.ld_i_with_addr(0xA130);
+        assert_eq!(interpreter.index_register, 0x0130)
     }
 
     #[test]
     fn test_jp_to_v0_plus_addr() {
-        let mut cpu = Cpu::new();
-        cpu.registers[0] = 0x46;
-        cpu.jp_to_v0_plus_addr(0xB111);
-        assert_eq!(cpu.program_counter, 0x0157);
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[0] = 0x46;
+        interpreter.jp_to_v0_plus_addr(0xB111);
+        assert_eq!(interpreter.program_counter, 0x0157);
     }
 
     #[test]
     fn test_rnd() {
-        let mut cpu = Cpu::new();
-        cpu.registers[8] = 0x46;
-        cpu.rnd(0xC811);
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[8] = 0x46;
+        interpreter.rnd(0xC811);
         assert!(true); // cant really test this with the rng
     }
 
     #[test]
     fn test_draw() {
-        let mut cpu = Cpu::new();
-        cpu.registers[1] = 0x20;
-        cpu.registers[2] = 0x10;
-        cpu.index_register = PROGRAM_START;
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[1] = 0x20;
+        interpreter.registers[2] = 0x10;
+        interpreter.index_register = PROGRAM_START;
         let sprite = [0xF0, 0x90, 0x90, 0x90, 0xF0];
-        cpu.memory[PROGRAM_START as usize..PROGRAM_START as usize + sprite.len()]
+        interpreter.memory[PROGRAM_START as usize..PROGRAM_START as usize + sprite.len()]
             .copy_from_slice(&sprite);
-        cpu.draw(0xD125);
+        interpreter.draw(0xD125);
 
         let coordinates = [
             (16, 32),
@@ -683,28 +753,111 @@ mod test {
         ];
 
         for (r, c) in coordinates {
-            assert!(cpu.screen[r][c])
+            assert!(interpreter.screen[r][c])
         }
-        assert_eq!(cpu.registers[0xF], 0)
+        assert_eq!(interpreter.registers[0xF], 0)
     }
 
     #[test]
     fn test_skp() {
-        let mut cpu = Cpu::new();
-        cpu.program_counter = PROGRAM_START;
-        cpu.registers[1] = 0x01;
-        cpu.keys[1] = true;
-        cpu.skp(0xE19E);
-        assert_eq!(cpu.program_counter, 0x202);
+        let mut interpreter = Interpreter::new();
+        interpreter.program_counter = PROGRAM_START;
+        interpreter.registers[1] = 0x01;
+        interpreter.keys[1] = true;
+        interpreter.skp(0xE19E);
+        assert_eq!(interpreter.program_counter, 0x202);
     }
 
     #[test]
     fn test_sknp() {
-        let mut cpu = Cpu::new();
-        cpu.program_counter = PROGRAM_START;
-        cpu.registers[1] = 0x01;
-        cpu.keys[1] = false;
-        cpu.sknp(0xE19E);
-        assert_eq!(cpu.program_counter, 0x202);
+        let mut interpreter = Interpreter::new();
+        interpreter.program_counter = PROGRAM_START;
+        interpreter.registers[1] = 0x01;
+        interpreter.keys[1] = false;
+        interpreter.sknp(0xE1A1);
+        assert_eq!(interpreter.program_counter, 0x202);
+    }
+
+    #[test]
+    fn test_ld_vx_with_dt() {
+        let mut interpreter = Interpreter::new();
+        interpreter.delay_timer = 2;
+        interpreter.ld_vx_with_dt(0xF107);
+        assert_eq!(interpreter.registers[1], 0x02);
+    }
+
+    #[test]
+    fn test_ld_vx_with_key_press() {
+        let mut interpreter = Interpreter::new();
+        interpreter.keys[1] = true;
+        interpreter.ld_vx_with_key_press(0xF10A);
+        assert_eq!(interpreter.registers[1], 0x01);
+    }
+
+    #[test]
+    fn test_ld_dt_with_vx() {
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[1] = 2;
+        interpreter.ld_dt_with_vx(0xF115);
+        assert_eq!(interpreter.delay_timer, 0x02);
+    }
+
+    #[test]
+    fn test_ld_st_with_vx() {
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[1] = 2;
+        interpreter.ld_st_with_vx(0xF118);
+        assert_eq!(interpreter.sound_timer, 0x02);
+    }
+
+    #[test]
+    fn test_add_i_with_vx() {
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[1] = 0x02;
+        interpreter.index_register = 0x25;
+        interpreter.add_i_with_vx(0xF11E);
+        assert_eq!(interpreter.index_register, 0x27);
+    }
+
+    #[test]
+    fn test_ld_i_with_font_address() {
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[1] = 0x02;
+        interpreter.ld_i_with_font_address(0xF129);
+        assert_eq!(interpreter.index_register, 0x0A);
+    }
+
+    #[test]
+    fn test_ld_bcd() {
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[1] = 0x87;
+        interpreter.ld_bcd(0xF133);
+        assert_eq!(interpreter.mem_read(0x0), 0x1);
+        assert_eq!(interpreter.mem_read(0x1), 0x3);
+        assert_eq!(interpreter.mem_read(0x2), 0x5);
+    }
+
+    #[test]
+    fn test_ld_mem_with_registers() {
+        let mut interpreter = Interpreter::new();
+        interpreter.registers[0] = 0x84;
+        interpreter.registers[1] = 0x85;
+        interpreter.registers[2] = 0x86;
+        interpreter.ld_mem_with_registers(0xF255);
+        assert_eq!(interpreter.mem_read(0x0), 0x84);
+        assert_eq!(interpreter.mem_read(0x1), 0x85);
+        assert_eq!(interpreter.mem_read(0x2), 0x86);
+    }
+
+    #[test]
+    fn test_ld_registers_with_mem() {
+        let mut interpreter = Interpreter::new();
+        interpreter.mem_write(0x0, 0x84);
+        interpreter.mem_write(0x1, 0x85);
+        interpreter.mem_write(0x2, 0x86);
+        interpreter.ld_registers_with_mem(0xF255);
+        assert_eq!(interpreter.registers[0], 0x84);
+        assert_eq!(interpreter.registers[1], 0x85);
+        assert_eq!(interpreter.registers[2], 0x86);
     }
 }

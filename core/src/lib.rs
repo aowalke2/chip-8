@@ -4,8 +4,8 @@ const PROGRAM_START: u16 = 0x200;
 const STACK_SIZE: usize = 16;
 const NUMBER_OF_REGISTERS: usize = 16;
 const MEMORY_SIZE: usize = 4096;
-const SCREEN_WIDTH: usize = 64;
-const SCREEN_HEIGHT: usize = 32;
+pub const SCREEN_WIDTH: usize = 64;
+pub const SCREEN_HEIGHT: usize = 32;
 const NUMBER_OF_KEYS: usize = 16;
 const FONTSET_SIZE: usize = 80;
 const FONTSET: [u8; FONTSET_SIZE] = [
@@ -402,13 +402,13 @@ impl Interpreter {
         self.program_counter = PROGRAM_START;
     }
 
-    pub fn fetch(&mut self) -> u16 {
+    fn fetch(&mut self) -> u16 {
         let opcode = self.mem_read_16(self.program_counter);
         self.program_counter += 2;
         opcode
     }
 
-    pub fn execute(&mut self, opcode: u16) {
+    fn execute(&mut self, opcode: u16) {
         let nibble1 = (opcode & 0xF000) >> 12;
         let nibble2 = (opcode & 0x0F00) >> 8;
         let nibble3 = (opcode & 0x00F0) >> 4;
@@ -452,6 +452,19 @@ impl Interpreter {
             (0xF, _, 6, 5) => self.ld_registers_with_mem(opcode),
             (_, _, _, _) => unimplemented!("Opcode not defined: {opcode}"),
         }
+    }
+
+    pub fn tick(&mut self) {
+        let opcode = self.fetch();
+        self.execute(opcode);
+    }
+
+    pub fn get_screen(&self) -> &[[bool; SCREEN_WIDTH]; SCREEN_HEIGHT] {
+        &self.screen
+    }
+
+    pub fn keypress(&mut self, key: usize, pressed: bool) {
+        self.keys[key] = pressed;
     }
 }
 
@@ -855,7 +868,7 @@ mod test {
         interpreter.mem_write(0x0, 0x84);
         interpreter.mem_write(0x1, 0x85);
         interpreter.mem_write(0x2, 0x86);
-        interpreter.ld_registers_with_mem(0xF255);
+        interpreter.ld_registers_with_mem(0xF265);
         assert_eq!(interpreter.registers[0], 0x84);
         assert_eq!(interpreter.registers[1], 0x85);
         assert_eq!(interpreter.registers[2], 0x86);

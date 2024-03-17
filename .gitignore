@@ -3,4 +3,4 @@
 *.rom
 /roms
 /web/wasm.js
-/web/.wasm_bg.wasm
+/web/wasm_bg.wasm

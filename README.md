@@ -6,7 +6,7 @@ In my quest to build a GBA emulator in rust, I started with a CHIP-8 interpreter
 
 Make sure you have the latest version of rust installed
 
-### Mac Os
+### Mac OS
 
 - Install [Homebrew](https://brew.sh/)
 - Install sdl2 with homebrow: `brew install sdl2`

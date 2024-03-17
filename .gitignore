@@ -2,4 +2,5 @@
 *.ch8
 *.rom
 /roms
-
+/web/wasm.js
+/web/.wasm_bg.wasm

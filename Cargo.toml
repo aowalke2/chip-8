@@ -1,1 +1,4 @@
-workspace = { members = ["desktop", "core"]}
+[workspace] 
+members = ["desktop", "core", "wasm"]
+
+resolver = "2"

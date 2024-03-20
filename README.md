@@ -19,14 +19,14 @@ Make sure you have the latest version of rust installed
 - Add this `export LIBRARY_PATH="$LIBRARY_PATH:$(brew --prefix)/lib"` to your .zshrc file if you use zsh or your .bashrc file if you use bash
 - In root directory of this project do cargo run and point it at the chip8 rom file you would like to run. Ex. `cargo run /ROM_ADDRESS`
 
-## WASM
+### WASM
 
 - Make sure you have wasm-pack installed. If not use `cargo install wasm-pack`
 - cd into the wasm directory of this project
 - Run: `wasm-pack build --target web`
 - Run: `mv pkg/wasm_bg.wasm ../web`
 - Run: `mv pkg/wasm.js ../web`
-- cd to the main project directory and then start a web server of you choice
+- cd to the main project directory and then start a web server of your choice
 
 ## Sources
 
